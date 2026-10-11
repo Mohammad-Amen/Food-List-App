@@ -1,0 +1,126 @@
+rules_version = '2';
+
+// Mirrors src/lib/permissions.ts — keep the two in sync.
+//   draft → only the owner edits items
+//   sent  → owner and recipient edit items; recipient may mark as seen
+//   seen  → nobody edits items; both participants can still tick items off
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+
+    function isNullOrString(v) { return v == null || v is string; }
+    function isNullOrNumber(v) { return v == null || v is number; }
+
+    match /users/{uid} {
+      allow get: if signedIn();
+      // Lookup by exact handle only — no browsing the user directory.
+      allow list: if signedIn() && request.query.limit <= 1;
+      allow create: if signedIn() && uid == me()
+        && request.resource.data.keys().hasOnly(['username', 'usernameLower', 'displayName', 'createdAt'])
+        && request.resource.data.username is string
+        && request.resource.data.usernameLower == request.resource.data.username.lower()
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 40;
+      // Handles are permanent.
+      allow update, delete: if false;
+    }
+
+    match /lists/{listId} {
+      function isOwner(l) { return l.ownerId == me(); }
+      function isRecipient(l) { return l.recipientId != null && l.recipientId == me(); }
+      function isParticipant(l) { return isOwner(l) || isRecipient(l); }
+
+      function validTitle(d) { return d.title is string && d.title.size() <= 60; }
+
+      function validNewList(d) {
+        return d.keys().hasOnly(['title', 'ownerId', 'ownerName', 'recipientId', 'recipientName',
+                                 'status', 'createdAt', 'updatedAt', 'sentAt', 'seenAt'])
+          && validTitle(d)
+          && d.ownerId == me()
+          && d.ownerName is string
+          && d.seenAt == null
+          && d.createdAt is number && d.updatedAt is number
+          && (
+            (d.status == 'draft' && d.recipientId == null && d.recipientName == null && d.sentAt == null)
+            || (d.status == 'sent' && d.recipientId is string && d.recipientId != me()
+                && d.recipientName is string && d.sentAt is number)
+          );
+      }
+
+      function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+      allow read: if signedIn() && isParticipant(resource.data);
+
+      allow create: if signedIn() && validNewList(request.resource.data);
+
+      allow update: if signedIn() && (
+        // Owner renames a draft or a sent list.
+        (isOwner(resource.data) && resource.data.status in ['draft', 'sent']
+          && changed().hasOnly(['title', 'updatedAt'])
+          && validTitle(request.resource.data))
+        // Owner sends a draft.
+        || (isOwner(resource.data) && resource.data.status == 'draft'
+          && request.resource.data.status == 'sent'
+          && changed().hasOnly(['status', 'recipientId', 'recipientName', 'sentAt', 'updatedAt', 'title'])
+          && request.resource.data.recipientId is string
+          && request.resource.data.recipientId != me()
+          && request.resource.data.recipientName is string
+          && request.resource.data.sentAt is number
+          && validTitle(request.resource.data))
+        // Recipient marks as seen (one way).
+        || (isRecipient(resource.data) && resource.data.status == 'sent'
+          && request.resource.data.status == 'seen'
+          && changed().hasOnly(['status', 'seenAt', 'updatedAt'])
+          && request.resource.data.seenAt is number)
+      );
+
+      allow delete: if signedIn() && isOwner(resource.data) && resource.data.status == 'draft';
+
+      match /items/{itemId} {
+        function parent() { return get(/databases/$(database)/documents/lists/$(listId)).data; }
+
+        function canEditItems(l) {
+          return (l.status == 'draft' && isOwner(l))
+            || (l.status == 'sent' && isParticipant(l));
+        }
+
+        function validItem(d) {
+          return d.name is string && d.name.size() > 0 && d.name.size() <= 60
+            && d.quantity is number && d.quantity > 0 && d.quantity <= 9999
+            && d.unit is string && d.unit.size() <= 20
+            && d.note is string && d.note.size() <= 200
+            && d.category in ['veg', 'meat', 'dairy', 'bakery', 'pantry', 'drinks', 'cleaning', 'other']
+            && d.checked is bool
+            && isNullOrString(d.checkedBy)
+            && d.addedBy is string && d.addedByName is string
+            && d.createdAt is number;
+        }
+
+        function itemChanged() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+        allow read: if signedIn() && isParticipant(parent());
+
+        allow create: if signedIn()
+          && canEditItems(parent())
+          && request.resource.data.keys().hasOnly(['name', 'quantity', 'unit', 'note', 'category',
+                                                    'checked', 'checkedBy', 'addedBy', 'addedByName', 'createdAt'])
+          && validItem(request.resource.data)
+          && request.resource.data.addedBy == me();
+
+        allow update: if signedIn() && validItem(request.resource.data) && (
+          // Edit the item's content (never who added it).
+          (canEditItems(parent())
+            && itemChanged().hasOnly(['name', 'quantity', 'unit', 'note', 'category', 'checked', 'checkedBy']))
+          // Tick / untick — allowed for participants in every status, including "seen".
+          || (isParticipant(parent())
+            && itemChanged().hasOnly(['checked', 'checkedBy'])
+            && (request.resource.data.checkedBy == null || request.resource.data.checkedBy == me()))
+        );
+
+        allow delete: if signedIn() && canEditItems(parent());
+      }
+    }
+  }
+}
