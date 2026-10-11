@@ -52,7 +52,6 @@ cp .env.example .env     # then paste your firebaseConfig values into .env
 ### 3. Deploy the security rules
 ```bash
 npx firebase login
-npx firebase use --add          # pick your project
 npx firebase deploy --only firestore:rules
 ```
 
@@ -65,13 +64,11 @@ The first time, Expo Go may show the layout left-to-right. Close the app and ope
 ### 5. Build an installable APK for your parent
 `.env` is not uploaded to the cloud build, so the APK needs the config in `eas.json` too:
 
-1. Open `eas.json` and paste the same six values from your `.env` into `build.base.env`.
-   They are public identifiers, not passwords, so they're safe to commit. Security comes from `firestore.rules`.
-2. Build:
-   ```bash
-   npx eas-cli@latest login
-   npx eas-cli@latest build -p android --profile preview
-   ```
+The Firebase config is already in `build.base.env` in `eas.json`. These values are public identifiers, not passwords, and security comes from `firestore.rules`. Build with:
+```bash
+npx eas-cli@latest login
+npx eas-cli@latest build -p android --profile preview
+```
 EAS builds it in the cloud for free and gives you a download link for the `.apk`. Open the link on the phone to install.
 
 ## Development
