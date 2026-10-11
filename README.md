@@ -63,12 +63,16 @@ npx firebase deploy --only firestore:rules
 The first time, Expo Go may show the layout left-to-right. Close the app and open it again and it switches to right-to-left. Installed builds (below) are always right-to-left.
 
 ### 5. Build an installable APK for your parent
-```bash
-npx eas-cli@latest login
-npx eas-cli@latest build -p android --profile preview
-```
+`.env` is not uploaded to the cloud build, so the APK needs the config in `eas.json` too:
+
+1. Open `eas.json` and paste the same six values from your `.env` into `build.base.env`.
+   They are public identifiers, not passwords, so they're safe to commit. Security comes from `firestore.rules`.
+2. Build:
+   ```bash
+   npx eas-cli@latest login
+   npx eas-cli@latest build -p android --profile preview
+   ```
 EAS builds it in the cloud for free and gives you a download link for the `.apk`. Open the link on the phone to install.
-Before building, add the same `EXPO_PUBLIC_FIREBASE_*` values as EAS environment variables (`npx eas-cli@latest env:create`) or keep them in `.env`.
 
 ## Development
 

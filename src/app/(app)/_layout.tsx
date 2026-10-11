@@ -1,12 +1,16 @@
 import { Stack } from 'expo-router';
 
 import { colors, font } from '../../components/ui';
+import { useAuth } from '../../lib/auth';
 import { ListsProvider } from '../../lib/lists';
 import { t } from '../../lib/strings';
 
 export const unstable_settings = { initialRouteName: '(tabs)' };
 
 export default function AppLayout() {
+  const { profile } = useAuth();
+  // Signing out clears the profile a render before the guard unmounts this group.
+  if (!profile) return null;
   return (
     <ListsProvider>
       <Stack
